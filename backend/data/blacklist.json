@@ -1,0 +1,47 @@
+[
+  {
+    "id": "BL-001",
+    "name": "Lagos Office Suppliies Ltd",
+    "cac_number": "RC-234568",
+    "reason": "Name impersonation fraud — fake vendor mimicking 'Lagos Office Supplies Ltd' (RC-234567). Duplicate invoice scheme detected in 2023.",
+    "flagged_at": "2023-08-14",
+    "flagged_by": "AP Team",
+    "amount_defrauded_ngn": 8500000
+  },
+  {
+    "id": "BL-002",
+    "name": "Abuja Tech Solutionz Nigeria",
+    "cac_number": null,
+    "reason": "Unregistered entity. Submitted invoices for IT equipment never delivered. CAC number invalid.",
+    "flagged_at": "2024-02-01",
+    "flagged_by": "Internal Audit",
+    "amount_defrauded_ngn": 23400000
+  },
+  {
+    "id": "BL-003",
+    "name": "Global Procurement Partners Ltd",
+    "cac_number": "RC-000001",
+    "reason": "Round-tripping scheme. Vendor connected to shell company. Payments traced to related party.",
+    "flagged_at": "2023-11-20",
+    "flagged_by": "External Auditor",
+    "amount_defrauded_ngn": 145000000
+  },
+  {
+    "id": "BL-004",
+    "name": "Swift Supplies Nigeria",
+    "cac_number": "RC-112233",
+    "reason": "Duplicate invoice fraud. Same invoice submitted 4 times under different reference numbers. ₦4.8M recovered.",
+    "flagged_at": "2024-05-10",
+    "flagged_by": "Finance Team",
+    "amount_defrauded_ngn": 19200000
+  },
+  {
+    "id": "BL-005",
+    "name": "Premier Construction & Engineering",
+    "cac_number": "RC-445679",
+    "reason": "Price inflation scheme. Invoiced at 340% above market rate for construction materials.",
+    "flagged_at": "2022-09-03",
+    "flagged_by": "Procurement Department",
+    "amount_defrauded_ngn": 67000000
+  }
+]

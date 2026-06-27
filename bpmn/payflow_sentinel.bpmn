@@ -1,0 +1,305 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:activiti="http://activiti.org/bpmn"
+             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+             xmlns:omgdc="http://www.omg.org/spec/DD/20100524/DC"
+             xmlns:omgdi="http://www.omg.org/spec/DD/20100524/DI"
+             typeLanguage="http://www.w3.org/2001/XMLSchema"
+             expressionLanguage="http://www.w3.org/1999/XPath"
+             targetNamespace="http://payflow.sentinel/bpmn">
+
+  <process id="PayFlowSentinel_P2P" name="PayFlow Sentinel — Procure-to-Pay" isExecutable="true">
+
+    <!-- ═══ START EVENT ═══ -->
+    <startEvent id="start_pr_submitted" name="Purchase Requisition Submitted">
+      <documentation>Triggered when an employee submits a purchase requisition via form or email.</documentation>
+      <outgoing>flow_start_to_reqparser</outgoing>
+    </startEvent>
+
+    <!-- ═══ AGENT 1: ReqParser ═══ -->
+    <serviceTask id="task_reqparser" name="ReqParser Agent&#xa;(LangChain + Claude)"
+                 activiti:type="http"
+                 activiti:requestMethod="POST"
+                 activiti:requestUrl="${ERP_BASE_URL}/req-parser/parse"
+                 activiti:requestHeaders="Content-Type: application/json">
+      <documentation>
+        LangChain + Claude Sonnet agent. Parses raw PR text into structured JSON.
+        Extracts: vendor, line items, category, budget code, total NGN, urgency.
+        Hosted in UiPath Agent Builder.
+      </documentation>
+      <incoming>flow_start_to_reqparser</incoming>
+      <outgoing>flow_reqparser_to_budget_gateway</outgoing>
+    </serviceTask>
+
+    <!-- ═══ GATEWAY: Budget Threshold ═══ -->
+    <exclusiveGateway id="gateway_budget_check" name="Budget Threshold?">
+      <documentation>
+        Routes based on PR total value:
+        - Over ₦20M → Board approval (out of scope for demo)
+        - ₦5M–₦20M → CFO approval task
+        - Under ₦5M → auto-route to VendorScout
+      </documentation>
+      <incoming>flow_reqparser_to_budget_gateway</incoming>
+      <outgoing>flow_over_20m</outgoing>
+      <outgoing>flow_5m_to_20m</outgoing>
+      <outgoing>flow_under_5m</outgoing>
+    </exclusiveGateway>
+
+    <!-- Over ₦20M: Board Approval (Human Task) -->
+    <userTask id="task_board_approval" name="Board Approval Required&#xa;(Over ₦20M)">
+      <documentation>High-value requisitions require Board-level human approval via UiPath Action Center.</documentation>
+      <incoming>flow_over_20m</incoming>
+      <outgoing>flow_board_to_vendor_scout</outgoing>
+    </userTask>
+
+    <!-- ₦5M–₦20M: CFO Approval (Human Task) -->
+    <userTask id="task_cfo_approval" name="CFO Approval Required&#xa;(₦5M–₦20M)">
+      <documentation>Mid-value requisitions require CFO approval via UiPath Action Center.</documentation>
+      <incoming>flow_5m_to_20m</incoming>
+      <outgoing>flow_cfo_to_vendor_scout</outgoing>
+    </userTask>
+
+    <!-- Merge approved flows -->
+    <exclusiveGateway id="gateway_approval_merge" name="Approval Merge">
+      <incoming>flow_board_to_vendor_scout</incoming>
+      <incoming>flow_cfo_to_vendor_scout</incoming>
+      <incoming>flow_under_5m</incoming>
+      <outgoing>flow_merge_to_vendor_scout</outgoing>
+    </exclusiveGateway>
+
+    <!-- ═══ AGENT 2: VendorScout ═══ -->
+    <serviceTask id="task_vendor_scout" name="VendorScout Agent&#xa;(CrewAI Multi-Agent)"
+                 activiti:type="http"
+                 activiti:requestMethod="POST"
+                 activiti:requestUrl="${ERP_BASE_URL}/vendor-scout/scout">
+      <documentation>
+        CrewAI two-agent crew: Researcher + Risk Scorer.
+        Checks vendor registry, CAC validity, blacklist, name similarity fraud.
+        Returns trust score (0-100) and recommendation: approve | review | reject.
+      </documentation>
+      <incoming>flow_merge_to_vendor_scout</incoming>
+      <outgoing>flow_vendor_scout_to_gateway</outgoing>
+    </serviceTask>
+
+    <!-- ═══ GATEWAY: Vendor Risk ═══ -->
+    <exclusiveGateway id="gateway_vendor_risk" name="Vendor Risk?">
+      <incoming>flow_vendor_scout_to_gateway</incoming>
+      <outgoing>flow_vendor_rejected</outgoing>
+      <outgoing>flow_vendor_review</outgoing>
+      <outgoing>flow_vendor_approved</outgoing>
+    </exclusiveGateway>
+
+    <!-- Vendor Rejected -->
+    <endEvent id="end_vendor_rejected" name="PR Rejected&#xa;(Fraudulent Vendor)">
+      <documentation>VendorScout flagged vendor as blacklisted or high-risk. PR is rejected automatically.</documentation>
+      <incoming>flow_vendor_rejected</incoming>
+    </endEvent>
+
+    <!-- Vendor Needs Review: Human Task -->
+    <userTask id="task_vendor_review" name="Procurement Officer&#xa;Vendor Review">
+      <documentation>VendorScout flagged medium risk. Procurement officer reviews and decides via UiPath Action Center.</documentation>
+      <incoming>flow_vendor_review</incoming>
+      <outgoing>flow_review_decision</outgoing>
+    </userTask>
+
+    <!-- Review Decision Gateway -->
+    <exclusiveGateway id="gateway_review_decision" name="Officer Decision?">
+      <incoming>flow_review_decision</incoming>
+      <outgoing>flow_review_approved</outgoing>
+      <outgoing>flow_review_rejected</outgoing>
+    </exclusiveGateway>
+
+    <endEvent id="end_review_rejected" name="PR Rejected&#xa;(Officer Decision)">
+      <incoming>flow_review_rejected</incoming>
+    </endEvent>
+
+    <!-- Merge approved vendor paths -->
+    <exclusiveGateway id="gateway_vendor_merge" name="Vendor Approved Merge">
+      <incoming>flow_vendor_approved</incoming>
+      <incoming>flow_review_approved</incoming>
+      <outgoing>flow_to_po_approval</outgoing>
+    </exclusiveGateway>
+
+    <!-- ═══ HUMAN TASK: PO Approval ═══ -->
+    <userTask id="task_po_approval" name="Procurement Officer&#xa;PO Approval">
+      <documentation>
+        Procurement officer reviews the full PO (line items, vendor, total) 
+        and approves or rejects via UiPath Action Center.
+      </documentation>
+      <incoming>flow_to_po_approval</incoming>
+      <outgoing>flow_po_decision</outgoing>
+    </userTask>
+
+    <!-- Gateway: PO Approved? -->
+    <exclusiveGateway id="gateway_po_approved" name="PO Approved?">
+      <incoming>flow_po_decision</incoming>
+      <outgoing>flow_po_yes</outgoing>
+      <outgoing>flow_po_no</outgoing>
+    </exclusiveGateway>
+
+    <endEvent id="end_po_rejected" name="PO Rejected&#xa;by Officer">
+      <incoming>flow_po_no</incoming>
+    </endEvent>
+
+    <!-- ═══ RPA BOT: PO Creator ═══ -->
+    <serviceTask id="task_rpa_po_creator" name="RPA Bot: Create PO&#xa;in ERP System"
+                 activiti:type="http"
+                 activiti:requestMethod="POST"
+                 activiti:requestUrl="${ERP_BASE_URL}/purchase-orders">
+      <documentation>
+        UiPath RPA bot. Automatically creates the Purchase Order in the ERP system,
+        assigns PO number, and triggers vendor notification email.
+      </documentation>
+      <incoming>flow_po_yes</incoming>
+      <outgoing>flow_po_created_to_grn</outgoing>
+    </serviceTask>
+
+    <!-- ═══ HUMAN TASK: Record GRN ═══ -->
+    <userTask id="task_record_grn" name="Warehouse: Record&#xa;Goods Receipt (GRN)">
+      <documentation>
+        Warehouse team records actual goods received via UiPath Action Center.
+        This creates the GRN used in 3-way match.
+      </documentation>
+      <incoming>flow_po_created_to_grn</incoming>
+      <outgoing>flow_grn_to_invoice</outgoing>
+    </userTask>
+
+    <!-- ═══ AGENT 3: InvoiceGuard ★ Claude Code ═══ -->
+    <serviceTask id="task_invoice_guard" name="InvoiceGuard Agent ★&#xa;(Claude Code via UiPath)"
+                 activiti:type="http"
+                 activiti:requestMethod="POST"
+                 activiti:requestUrl="${ERP_BASE_URL}/invoice-guard/guard">
+      <documentation>
+        ★ BUILT WITH CLAUDE CODE via UiPath for Coding Agents ★
+        Performs: 3-way match (PO/GRN/Invoice), forex rate validation,
+        and LLM-based fake invoice detection.
+        Outputs risk score 0-100 and recommendation: auto_pay | escalate | reject.
+      </documentation>
+      <incoming>flow_grn_to_invoice</incoming>
+      <outgoing>flow_guard_to_gateway</outgoing>
+    </serviceTask>
+
+    <!-- ═══ GATEWAY: Invoice Risk ═══ -->
+    <exclusiveGateway id="gateway_invoice_risk" name="Invoice Risk?">
+      <incoming>flow_guard_to_gateway</incoming>
+      <outgoing>flow_auto_pay</outgoing>
+      <outgoing>flow_escalate_to_ap</outgoing>
+      <outgoing>flow_invoice_rejected</outgoing>
+    </exclusiveGateway>
+
+    <!-- Invoice Rejected -->
+    <endEvent id="end_invoice_rejected" name="Invoice Rejected&#xa;(Fraud Detected)">
+      <documentation>InvoiceGuard scored invoice high-risk. Invoice rejected, vendor notified, case escalated to audit team.</documentation>
+      <incoming>flow_invoice_rejected</incoming>
+    </endEvent>
+
+    <!-- ═══ HUMAN TASK: AP Exception Review ═══ -->
+    <userTask id="task_ap_review" name="AP Team: Exception&#xa;Review">
+      <documentation>
+        InvoiceGuard flagged exceptions. AP team reviews discrepancies
+        and decides: approve payment or reject invoice.
+      </documentation>
+      <incoming>flow_escalate_to_ap</incoming>
+      <outgoing>flow_ap_decision</outgoing>
+    </userTask>
+
+    <!-- AP Decision Gateway -->
+    <exclusiveGateway id="gateway_ap_decision" name="AP Decision?">
+      <incoming>flow_ap_decision</incoming>
+      <outgoing>flow_ap_approved</outgoing>
+      <outgoing>flow_ap_rejected</outgoing>
+    </exclusiveGateway>
+
+    <endEvent id="end_ap_rejected" name="Invoice Rejected&#xa;by AP Team">
+      <incoming>flow_ap_rejected</incoming>
+    </endEvent>
+
+    <!-- Merge payment paths -->
+    <exclusiveGateway id="gateway_payment_merge" name="Payment Merge">
+      <incoming>flow_auto_pay</incoming>
+      <incoming>flow_ap_approved</incoming>
+      <outgoing>flow_to_payment</outgoing>
+    </exclusiveGateway>
+
+    <!-- ═══ RPA BOT: Payment Executor ═══ -->
+    <serviceTask id="task_rpa_payment" name="RPA Bot: Execute Payment&#xa;+ Audit Log"
+                 activiti:type="http"
+                 activiti:requestMethod="POST"
+                 activiti:requestUrl="${ERP_BASE_URL}/payments">
+      <documentation>
+        UiPath RPA bot. Executes bank transfer, logs payment reference,
+        updates invoice status to PAID, and generates audit trail entry.
+      </documentation>
+      <incoming>flow_to_payment</incoming>
+      <outgoing>flow_payment_to_end</outgoing>
+    </serviceTask>
+
+    <!-- ═══ END EVENT ═══ -->
+    <endEvent id="end_payment_confirmed" name="Payment Confirmed&#xa;✓ Process Complete">
+      <documentation>P2P cycle complete. Payment executed and audit trail logged.</documentation>
+      <incoming>flow_payment_to_end</incoming>
+    </endEvent>
+
+    <!-- ═══ SEQUENCE FLOWS ═══ -->
+    <sequenceFlow id="flow_start_to_reqparser" sourceRef="start_pr_submitted" targetRef="task_reqparser"/>
+    <sequenceFlow id="flow_reqparser_to_budget_gateway" sourceRef="task_reqparser" targetRef="gateway_budget_check"/>
+
+    <sequenceFlow id="flow_over_20m" name="Over ₦20M" sourceRef="gateway_budget_check" targetRef="task_board_approval">
+      <conditionExpression xsi:type="tFormalExpression">${estimated_value_ngn > 20000000}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow_5m_to_20m" name="₦5M–₦20M" sourceRef="gateway_budget_check" targetRef="task_cfo_approval">
+      <conditionExpression xsi:type="tFormalExpression">${estimated_value_ngn >= 5000000 &amp;&amp; estimated_value_ngn &lt;= 20000000}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow_under_5m" name="Under ₦5M" sourceRef="gateway_budget_check" targetRef="gateway_approval_merge">
+      <conditionExpression xsi:type="tFormalExpression">${estimated_value_ngn &lt; 5000000}</conditionExpression>
+    </sequenceFlow>
+
+    <sequenceFlow id="flow_board_to_vendor_scout" sourceRef="task_board_approval" targetRef="gateway_approval_merge"/>
+    <sequenceFlow id="flow_cfo_to_vendor_scout" sourceRef="task_cfo_approval" targetRef="gateway_approval_merge"/>
+    <sequenceFlow id="flow_merge_to_vendor_scout" sourceRef="gateway_approval_merge" targetRef="task_vendor_scout"/>
+
+    <sequenceFlow id="flow_vendor_scout_to_gateway" sourceRef="task_vendor_scout" targetRef="gateway_vendor_risk"/>
+    <sequenceFlow id="flow_vendor_rejected" name="Trust &lt; 20 (Reject)" sourceRef="gateway_vendor_risk" targetRef="end_vendor_rejected">
+      <conditionExpression xsi:type="tFormalExpression">${vendor_trust_score &lt; 20 || vendor_is_blacklisted == true}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow_vendor_review" name="Trust 20–60 (Review)" sourceRef="gateway_vendor_risk" targetRef="task_vendor_review">
+      <conditionExpression xsi:type="tFormalExpression">${vendor_trust_score >= 20 &amp;&amp; vendor_trust_score &lt; 60}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow_vendor_approved" name="Trust ≥ 60 (Approved)" sourceRef="gateway_vendor_risk" targetRef="gateway_vendor_merge">
+      <conditionExpression xsi:type="tFormalExpression">${vendor_trust_score >= 60 &amp;&amp; vendor_is_blacklisted == false}</conditionExpression>
+    </sequenceFlow>
+
+    <sequenceFlow id="flow_review_decision" sourceRef="task_vendor_review" targetRef="gateway_review_decision"/>
+    <sequenceFlow id="flow_review_approved" name="Approved" sourceRef="gateway_review_decision" targetRef="gateway_vendor_merge"/>
+    <sequenceFlow id="flow_review_rejected" name="Rejected" sourceRef="gateway_review_decision" targetRef="end_review_rejected"/>
+
+    <sequenceFlow id="flow_to_po_approval" sourceRef="gateway_vendor_merge" targetRef="task_po_approval"/>
+    <sequenceFlow id="flow_po_decision" sourceRef="task_po_approval" targetRef="gateway_po_approved"/>
+    <sequenceFlow id="flow_po_yes" name="Approved" sourceRef="gateway_po_approved" targetRef="task_rpa_po_creator"/>
+    <sequenceFlow id="flow_po_no" name="Rejected" sourceRef="gateway_po_approved" targetRef="end_po_rejected"/>
+
+    <sequenceFlow id="flow_po_created_to_grn" sourceRef="task_rpa_po_creator" targetRef="task_record_grn"/>
+    <sequenceFlow id="flow_grn_to_invoice" sourceRef="task_record_grn" targetRef="task_invoice_guard"/>
+    <sequenceFlow id="flow_guard_to_gateway" sourceRef="task_invoice_guard" targetRef="gateway_invoice_risk"/>
+
+    <sequenceFlow id="flow_auto_pay" name="Risk &lt; 25 (Auto-Pay)" sourceRef="gateway_invoice_risk" targetRef="gateway_payment_merge">
+      <conditionExpression xsi:type="tFormalExpression">${invoice_risk_score &lt; 25 &amp;&amp; invoice_recommendation == 'auto_pay'}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow_escalate_to_ap" name="Risk 25–59 (Escalate)" sourceRef="gateway_invoice_risk" targetRef="task_ap_review">
+      <conditionExpression xsi:type="tFormalExpression">${invoice_recommendation == 'escalate'}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow_invoice_rejected" name="Risk ≥ 60 (Reject)" sourceRef="gateway_invoice_risk" targetRef="end_invoice_rejected">
+      <conditionExpression xsi:type="tFormalExpression">${invoice_risk_score >= 60 || invoice_recommendation == 'reject'}</conditionExpression>
+    </sequenceFlow>
+
+    <sequenceFlow id="flow_ap_decision" sourceRef="task_ap_review" targetRef="gateway_ap_decision"/>
+    <sequenceFlow id="flow_ap_approved" name="Approved" sourceRef="gateway_ap_decision" targetRef="gateway_payment_merge"/>
+    <sequenceFlow id="flow_ap_rejected" name="Rejected" sourceRef="gateway_ap_decision" targetRef="end_ap_rejected"/>
+
+    <sequenceFlow id="flow_to_payment" sourceRef="gateway_payment_merge" targetRef="task_rpa_payment"/>
+    <sequenceFlow id="flow_payment_to_end" sourceRef="task_rpa_payment" targetRef="end_payment_confirmed"/>
+
+  </process>
+
+</definitions>
