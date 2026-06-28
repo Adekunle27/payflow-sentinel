@@ -1,306 +1,301 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-             xmlns:activiti="http://activiti.org/bpmn"
              xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
-             xmlns:omgdc="http://www.omg.org/spec/DD/20100524/DC"
-             xmlns:omgdi="http://www.omg.org/spec/DD/20100524/DI"
-             typeLanguage="http://www.w3.org/2001/XMLSchema"
-             expressionLanguage="http://www.w3.org/1999/XPath"
-             targetNamespace="http://payflow.sentinel/bpmn">
+             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+             targetNamespace="http://payflow.sentinel/bpmn"
+             id="PayFlowSentinel_Definitions">
 
   <process id="PayFlowSentinel_P2P" name="PayFlow Sentinel — Procure-to-Pay" isExecutable="true">
 
-    <!-- ═══ START EVENT ═══ -->
-    <startEvent id="start_pr_submitted" name="Purchase Requisition Submitted">
-      <documentation>Triggered when an employee submits a purchase requisition via form or email.</documentation>
-      <outgoing>flow_start_to_reqparser</outgoing>
+    <startEvent id="start_pr" name="PR Submitted">
+      <outgoing>f01</outgoing>
     </startEvent>
 
-    <!-- ═══ AGENT 1: ReqParser ═══ -->
-    <serviceTask id="task_reqparser" name="ReqParser Agent&#xa;(LangChain + Claude)"
-                 activiti:type="http"
-                 activiti:requestMethod="POST"
-                 activiti:requestUrl="${ERP_BASE_URL}/req-parser/parse"
-                 activiti:requestHeaders="Content-Type: application/json">
-      <documentation>
-        LangChain + Claude Sonnet agent. Parses raw PR text into structured JSON.
-        Extracts: vendor, line items, category, budget code, total NGN, urgency.
-        Hosted in UiPath Agent Builder.
-      </documentation>
-      <incoming>flow_start_to_reqparser</incoming>
-      <outgoing>flow_reqparser_to_budget_gateway</outgoing>
+    <serviceTask id="t_reqparser" name="ReqParser Agent&#xA;(LangChain + Claude)">
+      <incoming>f01</incoming>
+      <outgoing>f02</outgoing>
     </serviceTask>
 
-    <!-- ═══ GATEWAY: Budget Threshold ═══ -->
-    <exclusiveGateway id="gateway_budget_check" name="Budget Threshold?">
-      <documentation>
-        Routes based on PR total value:
-        - Over ₦20M → Board approval (out of scope for demo)
-        - ₦5M–₦20M → CFO approval task
-        - Under ₦5M → auto-route to VendorScout
-      </documentation>
-      <incoming>flow_reqparser_to_budget_gateway</incoming>
-      <outgoing>flow_over_20m</outgoing>
-      <outgoing>flow_5m_to_20m</outgoing>
-      <outgoing>flow_under_5m</outgoing>
+    <exclusiveGateway id="gw_budget" name="Budget Threshold?">
+      <incoming>f02</incoming>
+      <outgoing>f03</outgoing>
+      <outgoing>f04</outgoing>
+      <outgoing>f05</outgoing>
     </exclusiveGateway>
 
-    <!-- Over ₦20M: Board Approval (Human Task) -->
-    <userTask id="task_board_approval" name="Board Approval Required&#xa;(Over ₦20M)">
-      <documentation>High-value requisitions require Board-level human approval via UiPath Action Center.</documentation>
-      <incoming>flow_over_20m</incoming>
-      <outgoing>flow_board_to_vendor_scout</outgoing>
+    <userTask id="t_cfo" name="CFO Approval&#xA;(&#x20A6;5M - &#x20A6;20M)">
+      <incoming>f03</incoming>
+      <outgoing>f06</outgoing>
     </userTask>
 
-    <!-- ₦5M–₦20M: CFO Approval (Human Task) -->
-    <userTask id="task_cfo_approval" name="CFO Approval Required&#xa;(₦5M–₦20M)">
-      <documentation>Mid-value requisitions require CFO approval via UiPath Action Center.</documentation>
-      <incoming>flow_5m_to_20m</incoming>
-      <outgoing>flow_cfo_to_vendor_scout</outgoing>
+    <userTask id="t_board" name="Board Approval&#xA;(Over &#x20A6;20M)">
+      <incoming>f04</incoming>
+      <outgoing>f07</outgoing>
     </userTask>
 
-    <!-- Merge approved flows -->
-    <exclusiveGateway id="gateway_approval_merge" name="Approval Merge">
-      <incoming>flow_board_to_vendor_scout</incoming>
-      <incoming>flow_cfo_to_vendor_scout</incoming>
-      <incoming>flow_under_5m</incoming>
-      <outgoing>flow_merge_to_vendor_scout</outgoing>
+    <exclusiveGateway id="gw_merge_approval" name="Approval Merge">
+      <incoming>f05</incoming>
+      <incoming>f06</incoming>
+      <incoming>f07</incoming>
+      <outgoing>f08</outgoing>
     </exclusiveGateway>
 
-    <!-- ═══ AGENT 2: VendorScout ═══ -->
-    <serviceTask id="task_vendor_scout" name="VendorScout Agent&#xa;(CrewAI Multi-Agent)"
-                 activiti:type="http"
-                 activiti:requestMethod="POST"
-                 activiti:requestUrl="${ERP_BASE_URL}/vendor-scout/scout">
-      <documentation>
-        CrewAI two-agent crew: Researcher + Risk Scorer.
-        Checks vendor registry, CAC validity, blacklist, name similarity fraud.
-        Returns trust score (0-100) and recommendation: approve | review | reject.
-      </documentation>
-      <incoming>flow_merge_to_vendor_scout</incoming>
-      <outgoing>flow_vendor_scout_to_gateway</outgoing>
+    <serviceTask id="t_vendorscout" name="VendorScout Agent&#xA;(CrewAI Multi-Agent)">
+      <incoming>f08</incoming>
+      <outgoing>f09</outgoing>
     </serviceTask>
 
-    <!-- ═══ GATEWAY: Vendor Risk ═══ -->
-    <exclusiveGateway id="gateway_vendor_risk" name="Vendor Risk?">
-      <incoming>flow_vendor_scout_to_gateway</incoming>
-      <outgoing>flow_vendor_rejected</outgoing>
-      <outgoing>flow_vendor_review</outgoing>
-      <outgoing>flow_vendor_approved</outgoing>
+    <exclusiveGateway id="gw_vendor" name="Vendor Risk?">
+      <incoming>f09</incoming>
+      <outgoing>f10</outgoing>
+      <outgoing>f11</outgoing>
+      <outgoing>f12</outgoing>
     </exclusiveGateway>
 
-    <!-- Vendor Rejected -->
-    <endEvent id="end_vendor_rejected" name="PR Rejected&#xa;(Fraudulent Vendor)">
-      <documentation>VendorScout flagged vendor as blacklisted or high-risk. PR is rejected automatically.</documentation>
-      <incoming>flow_vendor_rejected</incoming>
+    <endEvent id="end_vendor_rejected" name="PR Rejected&#xA;Fraudulent Vendor">
+      <incoming>f10</incoming>
     </endEvent>
 
-    <!-- Vendor Needs Review: Human Task -->
-    <userTask id="task_vendor_review" name="Procurement Officer&#xa;Vendor Review">
-      <documentation>VendorScout flagged medium risk. Procurement officer reviews and decides via UiPath Action Center.</documentation>
-      <incoming>flow_vendor_review</incoming>
-      <outgoing>flow_review_decision</outgoing>
+    <userTask id="t_vendor_review" name="Procurement Officer&#xA;Vendor Review">
+      <incoming>f11</incoming>
+      <outgoing>f13</outgoing>
     </userTask>
 
-    <!-- Review Decision Gateway -->
-    <exclusiveGateway id="gateway_review_decision" name="Officer Decision?">
-      <incoming>flow_review_decision</incoming>
-      <outgoing>flow_review_approved</outgoing>
-      <outgoing>flow_review_rejected</outgoing>
+    <exclusiveGateway id="gw_vendor_decision" name="Officer Decision?">
+      <incoming>f13</incoming>
+      <outgoing>f14</outgoing>
+      <outgoing>f15</outgoing>
     </exclusiveGateway>
 
-    <endEvent id="end_review_rejected" name="PR Rejected&#xa;(Officer Decision)">
-      <incoming>flow_review_rejected</incoming>
+    <endEvent id="end_vendor_review_rejected" name="PR Rejected&#xA;by Officer">
+      <incoming>f14</incoming>
     </endEvent>
 
-    <!-- Merge approved vendor paths -->
-    <exclusiveGateway id="gateway_vendor_merge" name="Vendor Approved Merge">
-      <incoming>flow_vendor_approved</incoming>
-      <incoming>flow_review_approved</incoming>
-      <outgoing>flow_to_po_approval</outgoing>
+    <exclusiveGateway id="gw_vendor_merge" name="Vendor Approved">
+      <incoming>f12</incoming>
+      <incoming>f15</incoming>
+      <outgoing>f16</outgoing>
     </exclusiveGateway>
 
-    <!-- ═══ HUMAN TASK: PO Approval ═══ -->
-    <userTask id="task_po_approval" name="Procurement Officer&#xa;PO Approval">
-      <documentation>
-        Procurement officer reviews the full PO (line items, vendor, total) 
-        and approves or rejects via UiPath Action Center.
-      </documentation>
-      <incoming>flow_to_po_approval</incoming>
-      <outgoing>flow_po_decision</outgoing>
+    <userTask id="t_po_approval" name="Procurement Officer&#xA;PO Approval">
+      <incoming>f16</incoming>
+      <outgoing>f17</outgoing>
     </userTask>
 
-    <!-- Gateway: PO Approved? -->
-    <exclusiveGateway id="gateway_po_approved" name="PO Approved?">
-      <incoming>flow_po_decision</incoming>
-      <outgoing>flow_po_yes</outgoing>
-      <outgoing>flow_po_no</outgoing>
+    <exclusiveGateway id="gw_po" name="PO Approved?">
+      <incoming>f17</incoming>
+      <outgoing>f18</outgoing>
+      <outgoing>f19</outgoing>
     </exclusiveGateway>
 
-    <endEvent id="end_po_rejected" name="PO Rejected&#xa;by Officer">
-      <incoming>flow_po_no</incoming>
+    <endEvent id="end_po_rejected" name="PO Rejected">
+      <incoming>f18</incoming>
     </endEvent>
 
-    <!-- ═══ RPA BOT: PO Creator ═══ -->
-    <serviceTask id="task_rpa_po_creator" name="RPA Bot: Create PO&#xa;in ERP System"
-                 activiti:type="http"
-                 activiti:requestMethod="POST"
-                 activiti:requestUrl="${ERP_BASE_URL}/purchase-orders">
-      <documentation>
-        UiPath RPA bot. Automatically creates the Purchase Order in the ERP system,
-        assigns PO number, and triggers vendor notification email.
-      </documentation>
-      <incoming>flow_po_yes</incoming>
-      <outgoing>flow_po_created_to_grn</outgoing>
+    <serviceTask id="t_rpa_po" name="RPA Bot&#xA;Create PO in ERP">
+      <incoming>f19</incoming>
+      <outgoing>f20</outgoing>
     </serviceTask>
 
-    <!-- ═══ HUMAN TASK: Record GRN ═══ -->
-    <userTask id="task_record_grn" name="Warehouse: Record&#xa;Goods Receipt (GRN)">
-      <documentation>
-        Warehouse team records actual goods received via UiPath Action Center.
-        This creates the GRN used in 3-way match.
-      </documentation>
-      <incoming>flow_po_created_to_grn</incoming>
-      <outgoing>flow_grn_to_invoice</outgoing>
+    <userTask id="t_grn" name="Warehouse&#xA;Record GRN">
+      <incoming>f20</incoming>
+      <outgoing>f21</outgoing>
     </userTask>
 
-    <!-- ═══ AGENT 3: InvoiceGuard ★ Claude Code ═══ -->
-    <serviceTask id="task_invoice_guard" name="InvoiceGuard Agent ★&#xa;(Claude Code via UiPath)"
-                 activiti:type="http"
-                 activiti:requestMethod="POST"
-                 activiti:requestUrl="${ERP_BASE_URL}/invoice-guard/guard">
-      <documentation>
-        ★ BUILT WITH CLAUDE CODE via UiPath for Coding Agents ★
-        Performs: 3-way match (PO/GRN/Invoice), forex rate validation,
-        and LLM-based fake invoice detection.
-        Outputs risk score 0-100 and recommendation: auto_pay | escalate | reject.
-      </documentation>
-      <incoming>flow_grn_to_invoice</incoming>
-      <outgoing>flow_guard_to_gateway</outgoing>
+    <serviceTask id="t_invoiceguard" name="InvoiceGuard Agent &#x2605;&#xA;(Claude Code via UiPath)">
+      <incoming>f21</incoming>
+      <outgoing>f22</outgoing>
     </serviceTask>
 
-    <!-- ═══ GATEWAY: Invoice Risk ═══ -->
-    <exclusiveGateway id="gateway_invoice_risk" name="Invoice Risk?">
-      <incoming>flow_guard_to_gateway</incoming>
-      <outgoing>flow_auto_pay</outgoing>
-      <outgoing>flow_escalate_to_ap</outgoing>
-      <outgoing>flow_invoice_rejected</outgoing>
+    <exclusiveGateway id="gw_invoice" name="Invoice Risk?">
+      <incoming>f22</incoming>
+      <outgoing>f23</outgoing>
+      <outgoing>f24</outgoing>
+      <outgoing>f25</outgoing>
     </exclusiveGateway>
 
-    <!-- Invoice Rejected -->
-    <endEvent id="end_invoice_rejected" name="Invoice Rejected&#xa;(Fraud Detected)">
-      <documentation>InvoiceGuard scored invoice high-risk. Invoice rejected, vendor notified, case escalated to audit team.</documentation>
-      <incoming>flow_invoice_rejected</incoming>
+    <endEvent id="end_invoice_rejected" name="Invoice Rejected&#xA;Fraud Detected">
+      <incoming>f23</incoming>
     </endEvent>
 
-    <!-- ═══ HUMAN TASK: AP Exception Review ═══ -->
-    <userTask id="task_ap_review" name="AP Team: Exception&#xa;Review">
-      <documentation>
-        InvoiceGuard flagged exceptions. AP team reviews discrepancies
-        and decides: approve payment or reject invoice.
-      </documentation>
-      <incoming>flow_escalate_to_ap</incoming>
-      <outgoing>flow_ap_decision</outgoing>
+    <userTask id="t_ap_review" name="AP Team&#xA;Exception Review">
+      <incoming>f24</incoming>
+      <outgoing>f26</outgoing>
     </userTask>
 
-    <!-- AP Decision Gateway -->
-    <exclusiveGateway id="gateway_ap_decision" name="AP Decision?">
-      <incoming>flow_ap_decision</incoming>
-      <outgoing>flow_ap_approved</outgoing>
-      <outgoing>flow_ap_rejected</outgoing>
+    <exclusiveGateway id="gw_ap" name="AP Decision?">
+      <incoming>f26</incoming>
+      <outgoing>f27</outgoing>
+      <outgoing>f28</outgoing>
     </exclusiveGateway>
 
-    <endEvent id="end_ap_rejected" name="Invoice Rejected&#xa;by AP Team">
-      <incoming>flow_ap_rejected</incoming>
+    <endEvent id="end_ap_rejected" name="Invoice Rejected&#xA;by AP Team">
+      <incoming>f27</incoming>
     </endEvent>
 
-    <!-- Merge payment paths -->
-    <exclusiveGateway id="gateway_payment_merge" name="Payment Merge">
-      <incoming>flow_auto_pay</incoming>
-      <incoming>flow_ap_approved</incoming>
-      <outgoing>flow_to_payment</outgoing>
+    <exclusiveGateway id="gw_payment_merge" name="Payment Merge">
+      <incoming>f25</incoming>
+      <incoming>f28</incoming>
+      <outgoing>f29</outgoing>
     </exclusiveGateway>
 
-    <!-- ═══ RPA BOT: Payment Executor ═══ -->
-    <serviceTask id="task_rpa_payment" name="RPA Bot: Execute Payment&#xa;+ Audit Log"
-                 activiti:type="http"
-                 activiti:requestMethod="POST"
-                 activiti:requestUrl="${ERP_BASE_URL}/payments">
-      <documentation>
-        UiPath RPA bot. Executes bank transfer, logs payment reference,
-        updates invoice status to PAID, and generates audit trail entry.
-      </documentation>
-      <incoming>flow_to_payment</incoming>
-      <outgoing>flow_payment_to_end</outgoing>
+    <serviceTask id="t_rpa_payment" name="RPA Bot&#xA;Execute Payment + Audit">
+      <incoming>f29</incoming>
+      <outgoing>f30</outgoing>
     </serviceTask>
 
-    <!-- ═══ END EVENT ═══ -->
-    <endEvent id="end_payment_confirmed" name="Payment Confirmed&#xa;✓ Process Complete">
-      <documentation>P2P cycle complete. Payment executed and audit trail logged.</documentation>
-      <incoming>flow_payment_to_end</incoming>
+    <endEvent id="end_complete" name="Payment Confirmed&#xA;Process Complete">
+      <incoming>f30</incoming>
     </endEvent>
 
-    <!-- ═══ SEQUENCE FLOWS ═══ -->
-    <sequenceFlow id="flow_start_to_reqparser" sourceRef="start_pr_submitted" targetRef="task_reqparser"/>
-    <sequenceFlow id="flow_reqparser_to_budget_gateway" sourceRef="task_reqparser" targetRef="gateway_budget_check"/>
+    <!-- SEQUENCE FLOWS — all gateway outflows have conditionExpression -->
+    <sequenceFlow id="f01" sourceRef="start_pr" targetRef="t_reqparser"/>
+    <sequenceFlow id="f02" sourceRef="t_reqparser" targetRef="gw_budget"/>
 
-    <sequenceFlow id="flow_over_20m" name="Over ₦20M" sourceRef="gateway_budget_check" targetRef="task_board_approval">
-      <conditionExpression xsi:type="tFormalExpression">${estimated_value_ngn > 20000000}</conditionExpression>
+    <!-- Budget gateway: 3 conditional outflows -->
+    <sequenceFlow id="f03" name="NGN5M to NGN20M" sourceRef="gw_budget" targetRef="t_cfo">
+      <conditionExpression xsi:type="tFormalExpression">estimated_value_ngn &gt;= 5000000 &amp;&amp; estimated_value_ngn &lt; 20000000</conditionExpression>
     </sequenceFlow>
-    <sequenceFlow id="flow_5m_to_20m" name="₦5M–₦20M" sourceRef="gateway_budget_check" targetRef="task_cfo_approval">
-      <conditionExpression xsi:type="tFormalExpression">${estimated_value_ngn >= 5000000 &amp;&amp; estimated_value_ngn &lt;= 20000000}</conditionExpression>
+    <sequenceFlow id="f04" name="Over NGN20M" sourceRef="gw_budget" targetRef="t_board">
+      <conditionExpression xsi:type="tFormalExpression">estimated_value_ngn &gt;= 20000000</conditionExpression>
     </sequenceFlow>
-    <sequenceFlow id="flow_under_5m" name="Under ₦5M" sourceRef="gateway_budget_check" targetRef="gateway_approval_merge">
-      <conditionExpression xsi:type="tFormalExpression">${estimated_value_ngn &lt; 5000000}</conditionExpression>
-    </sequenceFlow>
-
-    <sequenceFlow id="flow_board_to_vendor_scout" sourceRef="task_board_approval" targetRef="gateway_approval_merge"/>
-    <sequenceFlow id="flow_cfo_to_vendor_scout" sourceRef="task_cfo_approval" targetRef="gateway_approval_merge"/>
-    <sequenceFlow id="flow_merge_to_vendor_scout" sourceRef="gateway_approval_merge" targetRef="task_vendor_scout"/>
-
-    <sequenceFlow id="flow_vendor_scout_to_gateway" sourceRef="task_vendor_scout" targetRef="gateway_vendor_risk"/>
-    <sequenceFlow id="flow_vendor_rejected" name="Trust &lt; 20 (Reject)" sourceRef="gateway_vendor_risk" targetRef="end_vendor_rejected">
-      <conditionExpression xsi:type="tFormalExpression">${vendor_trust_score &lt; 20 || vendor_is_blacklisted == true}</conditionExpression>
-    </sequenceFlow>
-    <sequenceFlow id="flow_vendor_review" name="Trust 20–60 (Review)" sourceRef="gateway_vendor_risk" targetRef="task_vendor_review">
-      <conditionExpression xsi:type="tFormalExpression">${vendor_trust_score >= 20 &amp;&amp; vendor_trust_score &lt; 60}</conditionExpression>
-    </sequenceFlow>
-    <sequenceFlow id="flow_vendor_approved" name="Trust ≥ 60 (Approved)" sourceRef="gateway_vendor_risk" targetRef="gateway_vendor_merge">
-      <conditionExpression xsi:type="tFormalExpression">${vendor_trust_score >= 60 &amp;&amp; vendor_is_blacklisted == false}</conditionExpression>
+    <sequenceFlow id="f05" name="Under NGN5M" sourceRef="gw_budget" targetRef="gw_merge_approval">
+      <conditionExpression xsi:type="tFormalExpression">estimated_value_ngn &lt; 5000000</conditionExpression>
     </sequenceFlow>
 
-    <sequenceFlow id="flow_review_decision" sourceRef="task_vendor_review" targetRef="gateway_review_decision"/>
-    <sequenceFlow id="flow_review_approved" name="Approved" sourceRef="gateway_review_decision" targetRef="gateway_vendor_merge"/>
-    <sequenceFlow id="flow_review_rejected" name="Rejected" sourceRef="gateway_review_decision" targetRef="end_review_rejected"/>
+    <!-- Approval merge: incoming only, no conditions needed -->
+    <sequenceFlow id="f06" sourceRef="t_cfo" targetRef="gw_merge_approval"/>
+    <sequenceFlow id="f07" sourceRef="t_board" targetRef="gw_merge_approval"/>
+    <sequenceFlow id="f08" sourceRef="gw_merge_approval" targetRef="t_vendorscout"/>
+    <sequenceFlow id="f09" sourceRef="t_vendorscout" targetRef="gw_vendor"/>
 
-    <sequenceFlow id="flow_to_po_approval" sourceRef="gateway_vendor_merge" targetRef="task_po_approval"/>
-    <sequenceFlow id="flow_po_decision" sourceRef="task_po_approval" targetRef="gateway_po_approved"/>
-    <sequenceFlow id="flow_po_yes" name="Approved" sourceRef="gateway_po_approved" targetRef="task_rpa_po_creator"/>
-    <sequenceFlow id="flow_po_no" name="Rejected" sourceRef="gateway_po_approved" targetRef="end_po_rejected"/>
-
-    <sequenceFlow id="flow_po_created_to_grn" sourceRef="task_rpa_po_creator" targetRef="task_record_grn"/>
-    <sequenceFlow id="flow_grn_to_invoice" sourceRef="task_record_grn" targetRef="task_invoice_guard"/>
-    <sequenceFlow id="flow_guard_to_gateway" sourceRef="task_invoice_guard" targetRef="gateway_invoice_risk"/>
-
-    <sequenceFlow id="flow_auto_pay" name="Risk &lt; 25 (Auto-Pay)" sourceRef="gateway_invoice_risk" targetRef="gateway_payment_merge">
-      <conditionExpression xsi:type="tFormalExpression">${invoice_risk_score &lt; 25 &amp;&amp; invoice_recommendation == 'auto_pay'}</conditionExpression>
+    <!-- Vendor gateway: 3 conditional outflows -->
+    <sequenceFlow id="f10" name="Blacklisted or Trust below 20" sourceRef="gw_vendor" targetRef="end_vendor_rejected">
+      <conditionExpression xsi:type="tFormalExpression">vendor_is_blacklisted == true || vendor_trust_score &lt; 20</conditionExpression>
     </sequenceFlow>
-    <sequenceFlow id="flow_escalate_to_ap" name="Risk 25–59 (Escalate)" sourceRef="gateway_invoice_risk" targetRef="task_ap_review">
-      <conditionExpression xsi:type="tFormalExpression">${invoice_recommendation == 'escalate'}</conditionExpression>
+    <sequenceFlow id="f11" name="Trust 20 to 60 needs review" sourceRef="gw_vendor" targetRef="t_vendor_review">
+      <conditionExpression xsi:type="tFormalExpression">vendor_is_blacklisted == false &amp;&amp; vendor_trust_score &gt;= 20 &amp;&amp; vendor_trust_score &lt; 60</conditionExpression>
     </sequenceFlow>
-    <sequenceFlow id="flow_invoice_rejected" name="Risk ≥ 60 (Reject)" sourceRef="gateway_invoice_risk" targetRef="end_invoice_rejected">
-      <conditionExpression xsi:type="tFormalExpression">${invoice_risk_score >= 60 || invoice_recommendation == 'reject'}</conditionExpression>
+    <sequenceFlow id="f12" name="Trust 60 or above approved" sourceRef="gw_vendor" targetRef="gw_vendor_merge">
+      <conditionExpression xsi:type="tFormalExpression">vendor_is_blacklisted == false &amp;&amp; vendor_trust_score &gt;= 60</conditionExpression>
     </sequenceFlow>
 
-    <sequenceFlow id="flow_ap_decision" sourceRef="task_ap_review" targetRef="gateway_ap_decision"/>
-    <sequenceFlow id="flow_ap_approved" name="Approved" sourceRef="gateway_ap_decision" targetRef="gateway_payment_merge"/>
-    <sequenceFlow id="flow_ap_rejected" name="Rejected" sourceRef="gateway_ap_decision" targetRef="end_ap_rejected"/>
+    <sequenceFlow id="f13" sourceRef="t_vendor_review" targetRef="gw_vendor_decision"/>
 
-    <sequenceFlow id="flow_to_payment" sourceRef="gateway_payment_merge" targetRef="task_rpa_payment"/>
-    <sequenceFlow id="flow_payment_to_end" sourceRef="task_rpa_payment" targetRef="end_payment_confirmed"/>
+    <!-- Officer decision: 2 conditional outflows -->
+    <sequenceFlow id="f14" name="Officer rejected vendor" sourceRef="gw_vendor_decision" targetRef="end_vendor_review_rejected">
+      <conditionExpression xsi:type="tFormalExpression">officer_vendor_decision == "rejected"</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="f15" name="Officer approved vendor" sourceRef="gw_vendor_decision" targetRef="gw_vendor_merge">
+      <conditionExpression xsi:type="tFormalExpression">officer_vendor_decision == "approved"</conditionExpression>
+    </sequenceFlow>
+
+    <sequenceFlow id="f16" sourceRef="gw_vendor_merge" targetRef="t_po_approval"/>
+    <sequenceFlow id="f17" sourceRef="t_po_approval" targetRef="gw_po"/>
+
+    <!-- PO gateway: 2 conditional outflows -->
+    <sequenceFlow id="f18" name="PO was rejected" sourceRef="gw_po" targetRef="end_po_rejected">
+      <conditionExpression xsi:type="tFormalExpression">po_decision == "rejected"</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="f19" name="PO was approved" sourceRef="gw_po" targetRef="t_rpa_po">
+      <conditionExpression xsi:type="tFormalExpression">po_decision == "approved"</conditionExpression>
+    </sequenceFlow>
+
+    <sequenceFlow id="f20" sourceRef="t_rpa_po" targetRef="t_grn"/>
+    <sequenceFlow id="f21" sourceRef="t_grn" targetRef="t_invoiceguard"/>
+    <sequenceFlow id="f22" sourceRef="t_invoiceguard" targetRef="gw_invoice"/>
+
+    <!-- Invoice gateway: 3 conditional outflows -->
+    <sequenceFlow id="f23" name="Risk 60 or above reject" sourceRef="gw_invoice" targetRef="end_invoice_rejected">
+      <conditionExpression xsi:type="tFormalExpression">invoice_risk_score &gt;= 60</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="f24" name="Risk 25 to 59 escalate" sourceRef="gw_invoice" targetRef="t_ap_review">
+      <conditionExpression xsi:type="tFormalExpression">invoice_risk_score &gt;= 25 &amp;&amp; invoice_risk_score &lt; 60</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="f25" name="Risk below 25 auto pay" sourceRef="gw_invoice" targetRef="gw_payment_merge">
+      <conditionExpression xsi:type="tFormalExpression">invoice_risk_score &lt; 25</conditionExpression>
+    </sequenceFlow>
+
+    <sequenceFlow id="f26" sourceRef="t_ap_review" targetRef="gw_ap"/>
+
+    <!-- AP gateway: 2 conditional outflows -->
+    <sequenceFlow id="f27" name="AP rejected invoice" sourceRef="gw_ap" targetRef="end_ap_rejected">
+      <conditionExpression xsi:type="tFormalExpression">ap_decision == "rejected"</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="f28" name="AP approved invoice" sourceRef="gw_ap" targetRef="gw_payment_merge">
+      <conditionExpression xsi:type="tFormalExpression">ap_decision == "approved"</conditionExpression>
+    </sequenceFlow>
+
+    <sequenceFlow id="f29" sourceRef="gw_payment_merge" targetRef="t_rpa_payment"/>
+    <sequenceFlow id="f30" sourceRef="t_rpa_payment" targetRef="end_complete"/>
 
   </process>
 
-</definitions>
+  <bpmndi:BPMNDiagram id="diagram_payflow" name="PayFlow Sentinel P2P">
+    <bpmndi:BPMNPlane id="plane_payflow" bpmnElement="PayFlowSentinel_P2P">
 
+      <bpmndi:BPMNShape id="s_start_pr" bpmnElement="start_pr"><dc:Bounds x="80" y="270" width="36" height="36"/><bpmndi:BPMNLabel><dc:Bounds x="58" y="312" width="80" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_reqparser" bpmnElement="t_reqparser"><dc:Bounds x="168" y="248" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_gw_budget" bpmnElement="gw_budget" isMarkerVisible="true"><dc:Bounds x="348" y="263" width="50" height="50"/><bpmndi:BPMNLabel><dc:Bounds x="330" y="319" width="86" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_cfo" bpmnElement="t_cfo"><dc:Bounds x="460" y="148" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_board" bpmnElement="t_board"><dc:Bounds x="460" y="48" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_gw_merge_approval" bpmnElement="gw_merge_approval" isMarkerVisible="true"><dc:Bounds x="648" y="263" width="50" height="50"/><bpmndi:BPMNLabel><dc:Bounds x="630" y="319" width="86" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_vendorscout" bpmnElement="t_vendorscout"><dc:Bounds x="760" y="248" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_gw_vendor" bpmnElement="gw_vendor" isMarkerVisible="true"><dc:Bounds x="948" y="263" width="50" height="50"/><bpmndi:BPMNLabel><dc:Bounds x="938" y="319" width="70" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_end_vendor_rejected" bpmnElement="end_vendor_rejected"><dc:Bounds x="1060" y="148" width="36" height="36"/><bpmndi:BPMNLabel><dc:Bounds x="1035" y="190" width="86" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_vendor_review" bpmnElement="t_vendor_review"><dc:Bounds x="1060" y="348" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_gw_vendor_decision" bpmnElement="gw_vendor_decision" isMarkerVisible="true"><dc:Bounds x="1248" y="363" width="50" height="50"/><bpmndi:BPMNLabel><dc:Bounds x="1228" y="419" width="90" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_end_vendor_review_rejected" bpmnElement="end_vendor_review_rejected"><dc:Bounds x="1360" y="448" width="36" height="36"/><bpmndi:BPMNLabel><dc:Bounds x="1336" y="490" width="84" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_gw_vendor_merge" bpmnElement="gw_vendor_merge" isMarkerVisible="true"><dc:Bounds x="1248" y="263" width="50" height="50"/><bpmndi:BPMNLabel><dc:Bounds x="1228" y="319" width="90" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_po_approval" bpmnElement="t_po_approval"><dc:Bounds x="1360" y="248" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_gw_po" bpmnElement="gw_po" isMarkerVisible="true"><dc:Bounds x="1548" y="263" width="50" height="50"/><bpmndi:BPMNLabel><dc:Bounds x="1532" y="319" width="82" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_end_po_rejected" bpmnElement="end_po_rejected"><dc:Bounds x="1660" y="148" width="36" height="36"/><bpmndi:BPMNLabel><dc:Bounds x="1643" y="190" width="70" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_rpa_po" bpmnElement="t_rpa_po"><dc:Bounds x="1660" y="248" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_grn" bpmnElement="t_grn"><dc:Bounds x="1840" y="248" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_invoiceguard" bpmnElement="t_invoiceguard"><dc:Bounds x="2020" y="248" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_gw_invoice" bpmnElement="gw_invoice" isMarkerVisible="true"><dc:Bounds x="2208" y="263" width="50" height="50"/><bpmndi:BPMNLabel><dc:Bounds x="2192" y="319" width="82" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_end_invoice_rejected" bpmnElement="end_invoice_rejected"><dc:Bounds x="2320" y="148" width="36" height="36"/><bpmndi:BPMNLabel><dc:Bounds x="2295" y="190" width="86" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_ap_review" bpmnElement="t_ap_review"><dc:Bounds x="2320" y="348" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_gw_ap" bpmnElement="gw_ap" isMarkerVisible="true"><dc:Bounds x="2508" y="363" width="50" height="50"/><bpmndi:BPMNLabel><dc:Bounds x="2492" y="419" width="82" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_end_ap_rejected" bpmnElement="end_ap_rejected"><dc:Bounds x="2620" y="448" width="36" height="36"/><bpmndi:BPMNLabel><dc:Bounds x="2596" y="490" width="84" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_gw_payment_merge" bpmnElement="gw_payment_merge" isMarkerVisible="true"><dc:Bounds x="2508" y="263" width="50" height="50"/><bpmndi:BPMNLabel><dc:Bounds x="2485" y="319" width="96" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_rpa_payment" bpmnElement="t_rpa_payment"><dc:Bounds x="2620" y="248" width="120" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s_end_complete" bpmnElement="end_complete"><dc:Bounds x="2800" y="270" width="36" height="36"/><bpmndi:BPMNLabel><dc:Bounds x="2775" y="312" width="86" height="27"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="e_f01" bpmnElement="f01"><di:waypoint x="116" y="288"/><di:waypoint x="168" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f02" bpmnElement="f02"><di:waypoint x="288" y="288"/><di:waypoint x="348" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f03" bpmnElement="f03"><di:waypoint x="373" y="263"/><di:waypoint x="373" y="188"/><di:waypoint x="460" y="188"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f04" bpmnElement="f04"><di:waypoint x="373" y="263"/><di:waypoint x="373" y="88"/><di:waypoint x="460" y="88"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f05" bpmnElement="f05"><di:waypoint x="398" y="288"/><di:waypoint x="648" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f06" bpmnElement="f06"><di:waypoint x="580" y="188"/><di:waypoint x="673" y="188"/><di:waypoint x="673" y="263"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f07" bpmnElement="f07"><di:waypoint x="580" y="88"/><di:waypoint x="673" y="88"/><di:waypoint x="673" y="263"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f08" bpmnElement="f08"><di:waypoint x="698" y="288"/><di:waypoint x="760" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f09" bpmnElement="f09"><di:waypoint x="880" y="288"/><di:waypoint x="948" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f10" bpmnElement="f10"><di:waypoint x="973" y="263"/><di:waypoint x="973" y="166"/><di:waypoint x="1060" y="166"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f11" bpmnElement="f11"><di:waypoint x="973" y="313"/><di:waypoint x="973" y="388"/><di:waypoint x="1060" y="388"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f12" bpmnElement="f12"><di:waypoint x="998" y="288"/><di:waypoint x="1248" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f13" bpmnElement="f13"><di:waypoint x="1180" y="388"/><di:waypoint x="1248" y="388"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f14" bpmnElement="f14"><di:waypoint x="1273" y="413"/><di:waypoint x="1273" y="466"/><di:waypoint x="1360" y="466"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f15" bpmnElement="f15"><di:waypoint x="1273" y="363"/><di:waypoint x="1273" y="313"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f16" bpmnElement="f16"><di:waypoint x="1298" y="288"/><di:waypoint x="1360" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f17" bpmnElement="f17"><di:waypoint x="1480" y="288"/><di:waypoint x="1548" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f18" bpmnElement="f18"><di:waypoint x="1573" y="263"/><di:waypoint x="1573" y="166"/><di:waypoint x="1660" y="166"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f19" bpmnElement="f19"><di:waypoint x="1598" y="288"/><di:waypoint x="1660" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f20" bpmnElement="f20"><di:waypoint x="1780" y="288"/><di:waypoint x="1840" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f21" bpmnElement="f21"><di:waypoint x="1960" y="288"/><di:waypoint x="2020" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f22" bpmnElement="f22"><di:waypoint x="2140" y="288"/><di:waypoint x="2208" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f23" bpmnElement="f23"><di:waypoint x="2233" y="263"/><di:waypoint x="2233" y="166"/><di:waypoint x="2320" y="166"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f24" bpmnElement="f24"><di:waypoint x="2233" y="313"/><di:waypoint x="2233" y="388"/><di:waypoint x="2320" y="388"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f25" bpmnElement="f25"><di:waypoint x="2258" y="288"/><di:waypoint x="2508" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f26" bpmnElement="f26"><di:waypoint x="2440" y="388"/><di:waypoint x="2508" y="388"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f27" bpmnElement="f27"><di:waypoint x="2533" y="413"/><di:waypoint x="2533" y="466"/><di:waypoint x="2620" y="466"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f28" bpmnElement="f28"><di:waypoint x="2533" y="363"/><di:waypoint x="2533" y="313"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f29" bpmnElement="f29"><di:waypoint x="2558" y="288"/><di:waypoint x="2620" y="288"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e_f30" bpmnElement="f30"><di:waypoint x="2740" y="288"/><di:waypoint x="2800" y="288"/></bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</definitions>
