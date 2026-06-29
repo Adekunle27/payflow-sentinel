@@ -10,6 +10,15 @@
 
 ---
 
+## 🤖 Agent Type Declaration
+
+**PayFlow Sentinel utilizes BOTH Coded Agents and Low-Code Agents in a hybrid orchestration model:**
+
+- **Low-Code Agent:** **`ReqParser`** is built natively within **UiPath Agent Builder**, leveraging declarative low-code flows combined with LangChain integrations.
+- **Coded Agents:** **`VendorScout`** (CrewAI Python framework) and **`InvoiceGuard`** (built via Claude Code / UiPath for Coding Agents) are fully programmatically coded agents deployed as microservices and connected via UiPath API Workflows.
+
+---
+
 ## 🎯 The Problem
 
 African enterprises lose an estimated **₦2 trillion+** annually to procurement fraud, duplicate invoices, fake vendors, and manual approval bottlenecks. A typical mid-size Nigerian company processes 200–500 purchase requisitions monthly — each touching 6–9 people across departments, taking 3–14 days end-to-end, with zero real-time visibility.
